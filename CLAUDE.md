@@ -67,7 +67,7 @@ coa_checker/
 ## 핵심 설계 원칙 (어기지 말 것)
 1. **AI/파서는 읽기만, 판정은 Python 코드가 한다.** 합부 판정은 `judge.py`의 결정적 규칙으로만 수행한다.
 2. **모르면 추측하지 말고 REVIEW(검토 필요).** 항목 누락, 모르는 단위, 이상한 숫자 형식, 추출 실패는 모두 REVIEW.
-3. **수치 비교는 Decimal.** float 비교 금지. 경계값은 포함(이하/이상 → 같으면 PASS).
+3. **수치 비교는 Decimal.** float 비교 금지. 경계값은 포함(이하/이상 → 같으면 PASS). 엑셀 등에서 읽은 숫자는 `Decimal(float)`가 아니라 `Decimal(str(값))`으로 변환한다(STEP 3 spec 로딩에 반영).
 4. **단일 진입점.** 메일 경로·폴더 감시·수동 업로드 모두 `core/pipeline.process_pdf()`를 호출한다.
 5. **판정 근거를 남긴다.** 항목별 원문 값, 원문 단위, 환산 값, 규격 하한/상한, 판정, 사유, 적용 Spec 버전을 DB에 저장한다.
 6. **협력사에 자동 발송하지 않는다.** 협력사 통보서는 초안(임시보관함 저장 또는 파일)까지만.
@@ -78,6 +78,13 @@ coa_checker/
 - 특수 표기: `<x`, `≤x` → x가 상한 이하이면 PASS, 아니면 REVIEW. `N.D.`, `ND`, `Not Detected`, `>x`, 범위(`0.5~1.0`), 빈 값 → REVIEW.
 - Spec에 있는데 COA에 없는 항목 → REVIEW("항목 누락"). COA에만 있는 항목 → 기록만 하고 판정 제외.
 - 질량분율 단위 환산(기준 ppm): `% = wt% = w/w% = 10000 ppm`, `ppm = mg/kg = μg/g = ug/g`, `ppb = μg/kg = 0.001 ppm`, `g/kg = 1000 ppm`. 무차원 단위(예: APHA)는 동일 단위끼리만 비교, 다르면 REVIEW.
+
+## 시연 조건 (STEP 7에서 반영)
+- 수신 계정 `adm1nsubin@outlook.kr`, 발신자 `jaemin9905@naver.com`(협력사 역할, `config.toml`의 `mail.test_senders`), 담당자 `alstnqls02@naver.com`.
+- 메일 1통에 `samples/`의 PDF 5장을 모두 첨부해 보낸다. 제목에 `COA` 포함.
+- 첨부가 여러 개면 첨부별로 각각 `process_pdf()`를 실행하고, 하나가 실패해도 나머지는 계속 처리한다.
+- 담당자 알림은 첨부별이 아니라 **메일 1통당 요약 알림 1통**: 문서별 판정 요약 + FAIL/REVIEW 항목 상세.
+- 기대 결과는 `samples/expected.json`(N2419는 Water `<10 ppm` → PASS, Fe `N.D.` → REVIEW, 문서 REVIEW).
 
 ## 코딩 규칙
 - 함수/모듈에 한국어 docstring 한두 줄. 사용자 메시지·로그는 한국어.
