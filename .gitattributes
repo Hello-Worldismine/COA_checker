@@ -1,0 +1,4 @@
+# 바이너리 파일은 줄바꿈 변환 금지 (PDF 손상 방지)
+*.pdf binary
+*.xlsx binary
+*.db binary
