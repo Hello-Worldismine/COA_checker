@@ -1,0 +1,26 @@
+# AI COA 자동검증기 설정 파일
+# 상대 경로는 이 파일이 있는 프로젝트 루트 기준으로 해석한다.
+
+[paths]
+inbox = "inbox"                      # 메일에서 저장한 COA PDF
+output = "output"                    # 결과 엑셀, 통보서 초안
+db = "output/coa_history.db"         # 검증 이력 SQLite
+spec_master = "data/spec_master.xlsx"
+logs = "logs"
+
+[mail]
+subject_keyword = "COA"              # 제목에 이 문자열이 있어야 COA 메일로 본다
+allowed_domains = []                 # spec_master 협력사 도메인 외 추가 허용 도메인 (예: ["supplier.co.kr"])
+test_senders = []                    # 시연용 사내 발신자 주소 (예: ["me@company.com"])
+processed_category = "COA검증완료"   # 처리 완료 메일에 붙일 Outlook 분류
+backlog_days = 7                     # 시작 시 미처리 메일을 며칠 전까지 훑을지
+
+[alert]
+mode = "display"                     # "display"(창만 띄움) / "send"(발송)
+to = []                              # 담당자 메일 주소
+
+[watch]
+mode = "outlook"                     # "outlook" 또는 "folder"
+
+[extract]
+llm_fallback = false                 # LLM 보조 추출 (MVP에서는 미구현, 항상 false)

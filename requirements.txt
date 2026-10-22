@@ -1,0 +1,10 @@
+# Python 3.12.5 기준. 직접 사용하는 패키지만 == 로 고정.
+pywin32==312
+pdfplumber==0.11.10
+pydantic==2.14.1
+openpyxl==3.1.5
+pandas==3.1.0
+streamlit==1.66.1
+watchdog==6.0.0
+pytest==9.1.1
+reportlab==5.1.0
