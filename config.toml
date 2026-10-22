@@ -9,15 +9,16 @@ spec_master = "data/spec_master.xlsx"
 logs = "logs"
 
 [mail]
+account = "adm1nsubin@outlook.kr"    # COA를 받는 Outlook 계정(이 계정의 받은편지함만 감시). 비우면 Outlook 기본 계정
 subject_keyword = "COA"              # 제목에 이 문자열이 있어야 COA 메일로 본다
 allowed_domains = []                 # spec_master 협력사 도메인 외 추가 허용 도메인 (예: ["supplier.co.kr"])
-test_senders = []                    # 시연용 사내 발신자 주소 (예: ["me@company.com"])
+test_senders = ["jaemin9905@naver.com"]  # 시연용 발신자 주소 (협력사 역할)
 processed_category = "COA검증완료"   # 처리 완료 메일에 붙일 Outlook 분류
 backlog_days = 7                     # 시작 시 미처리 메일을 며칠 전까지 훑을지
 
 [alert]
 mode = "display"                     # "display"(창만 띄움) / "send"(발송)
-to = []                              # 담당자 메일 주소
+to = ["alstnqls02@naver.com"]        # 담당자 메일 주소
 
 [watch]
 mode = "outlook"                     # "outlook" 또는 "folder"
