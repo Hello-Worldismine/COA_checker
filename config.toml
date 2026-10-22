@@ -6,6 +6,7 @@ inbox = "inbox"                      # 메일에서 저장한 COA PDF
 output = "output"                    # 결과 엑셀, 통보서 초안
 db = "output/coa_history.db"         # 검증 이력 SQLite
 spec_master = "data/spec_master.xlsx"
+samples = "samples"                  # 시연용 COA PDF와 정답지(expected.json)
 logs = "logs"
 
 [mail]

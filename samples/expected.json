@@ -1,0 +1,191 @@
+{
+  "_설명": "샘플 COA별 기대 판정. scripts/make_samples.py가 생성하며 테스트 정답지로 쓴다.",
+  "spec_version": "v1.0",
+  "samples": {
+    "COA_Alpha_A2401_pass.pdf": {
+      "supplier": "Alpha Chemical Co., Ltd.",
+      "material_code": "NMP-EL",
+      "lot": "A2401",
+      "form": "alpha",
+      "overall": "PASS",
+      "items": {
+        "Purity": {
+          "raw_name": "Purity",
+          "raw_value": "99.95",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Moisture": {
+          "raw_name": "Moisture",
+          "raw_value": "0.002",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Iron": {
+          "raw_name": "Iron (Fe)",
+          "raw_value": "0.003",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Color": {
+          "raw_name": "Color",
+          "raw_value": "5",
+          "raw_unit": "APHA",
+          "status": "PASS",
+          "note": ""
+        }
+      }
+    },
+    "COA_Nippon_N2417_pass.pdf": {
+      "supplier": "Nippon Solvent Co., Ltd.",
+      "material_code": "NMP-EL",
+      "lot": "N2417",
+      "form": "nippon",
+      "overall": "PASS",
+      "items": {
+        "Purity": {
+          "raw_name": "Assay",
+          "raw_value": "99.93",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Moisture": {
+          "raw_name": "Water",
+          "raw_value": "20",
+          "raw_unit": "ppm",
+          "status": "PASS",
+          "note": "20 ppm = 0.002 % ≤ 상한 0.003 %"
+        },
+        "Iron": {
+          "raw_name": "Fe",
+          "raw_value": "10",
+          "raw_unit": "ppm",
+          "status": "PASS",
+          "note": "10 ppm = 0.001 % ≤ 상한 0.005 %"
+        },
+        "Color": {
+          "raw_name": "Colour",
+          "raw_value": "8",
+          "raw_unit": "APHA",
+          "status": "PASS",
+          "note": ""
+        }
+      }
+    },
+    "COA_Alpha_A2402_fail.pdf": {
+      "supplier": "Alpha Chemical Co., Ltd.",
+      "material_code": "NMP-EL",
+      "lot": "A2402",
+      "form": "alpha",
+      "overall": "FAIL",
+      "items": {
+        "Purity": {
+          "raw_name": "Purity",
+          "raw_value": "99.95",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Moisture": {
+          "raw_name": "Moisture",
+          "raw_value": "0.002",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Iron": {
+          "raw_name": "Iron (Fe)",
+          "raw_value": "0.008",
+          "raw_unit": "%",
+          "status": "FAIL",
+          "note": "0.008 % > 상한 0.005 %"
+        },
+        "Color": {
+          "raw_name": "Color",
+          "raw_value": "5",
+          "raw_unit": "APHA",
+          "status": "PASS",
+          "note": ""
+        }
+      }
+    },
+    "COA_Nippon_N2418_fail.pdf": {
+      "supplier": "Nippon Solvent Co., Ltd.",
+      "material_code": "NMP-EL",
+      "lot": "N2418",
+      "form": "nippon",
+      "overall": "FAIL",
+      "items": {
+        "Purity": {
+          "raw_name": "Assay",
+          "raw_value": "99.93",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Moisture": {
+          "raw_name": "Water",
+          "raw_value": "50",
+          "raw_unit": "ppm",
+          "status": "FAIL",
+          "note": "50 ppm = 0.005 % > 상한 0.003 %"
+        },
+        "Iron": {
+          "raw_name": "Fe",
+          "raw_value": "10",
+          "raw_unit": "ppm",
+          "status": "PASS",
+          "note": "10 ppm = 0.001 % ≤ 상한 0.005 %"
+        },
+        "Color": {
+          "raw_name": "Colour",
+          "raw_value": "8",
+          "raw_unit": "APHA",
+          "status": "PASS",
+          "note": ""
+        }
+      }
+    },
+    "COA_Nippon_N2419_review.pdf": {
+      "supplier": "Nippon Solvent Co., Ltd.",
+      "material_code": "NMP-EL",
+      "lot": "N2419",
+      "form": "nippon",
+      "overall": "REVIEW",
+      "items": {
+        "Purity": {
+          "raw_name": "Assay",
+          "raw_value": "99.93",
+          "raw_unit": "%",
+          "status": "PASS",
+          "note": ""
+        },
+        "Moisture": {
+          "raw_name": "Water",
+          "raw_value": "<10",
+          "raw_unit": "ppm",
+          "status": "PASS",
+          "note": "<10 ppm: 10 ppm = 0.001 % ≤ 상한 0.003 %"
+        },
+        "Iron": {
+          "raw_name": "Fe",
+          "raw_value": "N.D.",
+          "raw_unit": "",
+          "status": "REVIEW",
+          "note": "N.D. 표기: 검출한계 불명"
+        },
+        "Color": {
+          "raw_name": "Colour",
+          "raw_value": "8",
+          "raw_unit": "APHA",
+          "status": "PASS",
+          "note": ""
+        }
+      }
+    }
+  }
+}
