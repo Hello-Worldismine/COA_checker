@@ -8,6 +8,7 @@
 import argparse
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from core.judge import fmt, judge, limit_text
 from core.models import CoaResult, ProcessOutput, Status
 from core.reporter import is_processed, save_all
 from core.spec import SpecMaster, load_spec_master
+from core.units import normalize_unit
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +50,35 @@ def process_pdf(pdf_path: Path | str, meta: dict[str, Any] | None = None, spec: 
         return ProcessOutput(result=result)
     saved = save_all(result, Path(pdf_path), paths)
     return ProcessOutput(result=result, saved=saved, skipped=saved.document_id is None)
+
+
+def short_supplier(name: str | None) -> str:
+    """'Nippon Solvent Co., Ltd.' → 'Nippon Solvent' (표시용)."""
+    if not name:
+        return "협력사 미상"
+    return re.sub(r"[\s,]*(co\.?,?\s*ltd\.?|ltd\.?|inc\.?|corp(oration)?\.?|gmbh|llc)$", "", name, flags=re.I).strip()
+
+
+def summary_line(result: CoaResult) -> str:
+    """콘솔·로그용 한 줄 요약: 'COA 수신: Nippon Solvent / N2418 → 부적합 (Moisture 50 ppm = 0.005 % > 0.003 %)'."""
+    doc = result.document
+    who = f"{short_supplier(doc.supplier)} / {doc.lot_no or 'Lot 미상'}"
+    status = result.overall_status
+    detail = "규격 항목 모두 적합"
+    if status is Status.FAIL:
+        r = next(r for r in result.item_results if r.status is Status.FAIL)
+        detail = f"{r.item_std}: {r.reason}"
+        if r.normalized_value is not None:
+            raw = f"{r.raw_value} {r.raw_unit or ''}".strip()
+            shown = raw if normalize_unit(r.raw_unit) == r.spec_unit else f"{raw} = {fmt(r.normalized_value)} {r.spec_unit}"
+            if r.upper is not None and r.normalized_value > r.upper:
+                detail = f"{r.item_std} {shown} > {fmt(r.upper)} {r.spec_unit}"
+            elif r.lower is not None and r.normalized_value < r.lower:
+                detail = f"{r.item_std} {shown} < {fmt(r.lower)} {r.spec_unit}"
+    elif status is Status.REVIEW:
+        r = next((r for r in result.item_results if r.status is Status.REVIEW), None)
+        detail = f"{r.item_std}: {r.reason}" if r else (result.reasons[0] if result.reasons else "확인 필요")
+    return f"COA 수신: {who} → {STATUS_LABEL[status]} ({detail})"
 
 
 def _paint(text: str, status: Status, color: bool) -> str:

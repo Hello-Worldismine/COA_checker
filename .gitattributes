@@ -2,3 +2,4 @@
 *.pdf binary
 *.xlsx binary
 *.db binary
+*.bat text eol=crlf

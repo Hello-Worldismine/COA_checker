@@ -124,6 +124,15 @@ def is_processed(db_path: Path, mail_entry_id: str, attachment_name: str | None 
         return conn.execute(sql + " LIMIT 1", args).fetchone() is not None
 
 
+def is_file_recorded(db_path: Path, file_path: Path) -> bool:
+    """이 PDF 경로가 이미 이력에 있는지 (폴더 감시 재시작 시 중복 처리 방지)."""
+    if not db_path.exists():
+        return False
+    with closing(connect(db_path)) as conn:
+        row = conn.execute("SELECT 1 FROM documents WHERE file_path = ? LIMIT 1", (str(Path(file_path).resolve()),))
+        return row.fetchone() is not None
+
+
 def save_to_db(db_path: Path, result: CoaResult, file_path: Path) -> int | None:
     """판정 결과와 항목별 근거를 저장하고 문서 ID를 반환한다. 같은 메일 첨부가 이미 있으면 None."""
     doc, meta = result.document, result.meta

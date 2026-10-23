@@ -23,6 +23,7 @@ to = ["alstnqls02@naver.com"]        # 담당자 메일 주소
 
 [watch]
 mode = "outlook"                     # "outlook" 또는 "folder"
+poll_seconds = 60                    # outlook 모드: 이벤트를 놓친 메일을 다시 훑는 주기(초), 0이면 끔
 
 [extract]
 llm_fallback = false                 # LLM 보조 추출 (MVP에서는 미구현, 항상 false)
