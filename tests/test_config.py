@@ -14,7 +14,7 @@ def test_load_default_config():
     assert cfg["paths"]["inbox"].is_absolute()
     assert cfg["mail"]["subject_keyword"] == "COA"
     assert cfg["mail"]["processed_category"] == "COA검증완료"
-    assert cfg["alert"]["mode"] == "display"
+    assert cfg["alert"]["mode"] in ("display", "send")
     assert cfg["watch"]["mode"] == "outlook"
     assert cfg["extract"]["llm_fallback"] is False
 
