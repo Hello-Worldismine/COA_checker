@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -53,10 +54,18 @@ class ItemResult(BaseModel):
 
 
 class CoaResult(BaseModel):
-    """COA 문서 1장의 판정 결과 전체."""
+    """COA 문서 1장의 판정 결과 전체.
+
+    reasons: 항목이 아닌 문서 단위 검토 사유(재질 미확인, 추출 경고 등).
+    extra_items: COA에만 있고 Spec에 없는 항목(기록만, 판정 제외).
+    meta: 메일 경로일 때 발신자·수신시각·EntryID 등 호출자가 넘긴 정보.
+    """
 
     document: CoaDocument
     item_results: list[ItemResult] = Field(default_factory=list)
     overall_status: Status
+    reasons: list[str] = Field(default_factory=list)
+    extra_items: list[ExtractedItem] = Field(default_factory=list)
     spec_version: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
     processed_at: datetime = Field(default_factory=datetime.now)

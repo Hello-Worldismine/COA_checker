@@ -77,6 +77,7 @@ coa_checker/
 - 상태: `PASS`(적합) / `FAIL`(부적합) / `REVIEW`(검토 필요). 문서 전체 판정 = FAIL이 하나라도 있으면 FAIL, 아니면 REVIEW가 있으면 REVIEW, 모두 PASS면 PASS.
 - 특수 표기: `<x`, `≤x` → x가 상한 이하이면 PASS, 아니면 REVIEW. `N.D.`, `ND`, `Not Detected`, `>x`, 범위(`0.5~1.0`), 빈 값 → REVIEW.
 - Spec에 있는데 COA에 없는 항목 → REVIEW("항목 누락"). COA에만 있는 항목 → 기록만 하고 판정 제외.
+- 단위가 비어 있는 숫자 값 → REVIEW(사유 "단위 미기재 - 확인 필요"). 규격 단위로 간주하지 않는다.
 - 질량분율 단위 환산(기준 ppm): `% = wt% = w/w% = 10000 ppm`, `ppm = mg/kg = μg/g = ug/g`, `ppb = μg/kg = 0.001 ppm`, `g/kg = 1000 ppm`. 무차원 단위(예: APHA)는 동일 단위끼리만 비교, 다르면 REVIEW.
 
 ## 시연 조건 (STEP 7에서 반영)

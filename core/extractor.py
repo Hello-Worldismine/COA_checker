@@ -195,6 +195,19 @@ def _width(text: str) -> int:
     return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
 
 
+def format_table(rows: list[tuple[str, ...]]) -> list[str]:
+    """첫 행을 머리글로 하는 콘솔 표 줄 목록을 만든다 (한글 폭 맞춤)."""
+    widths = [max(_width(r[c]) for r in rows) for c in range(len(rows[0]))]
+    line = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+    out = [line]
+    for n, r in enumerate(rows):
+        out.append("| " + " | ".join(v + " " * (w - _width(v)) for v, w in zip(r, widths)) + " |")
+        if n == 0:
+            out.append(line)
+    out.append(line)
+    return out
+
+
 def _print_document(doc: CoaDocument, spec: SpecMaster) -> None:
     """추출 결과를 표 형태로 출력한다."""
     mapper = ItemMapper.from_spec(spec, doc.material_code)
@@ -206,14 +219,7 @@ def _print_document(doc: CoaDocument, spec: SpecMaster) -> None:
     print(f"제조일   : {doc.mfg_date}")
     rows = [("원문 항목명", "값", "단위", "표준 항목")]
     rows += [(i.raw_name, i.raw_value, i.raw_unit or "-", mapper.map(i.raw_name) or "(매핑 없음)") for i in doc.items]
-    widths = [max(_width(r[c]) for r in rows) for c in range(4)]
-    line = "+-" + "-+-".join("-" * w for w in widths) + "-+"
-    print(line)
-    for n, r in enumerate(rows):
-        print("| " + " | ".join(v + " " * (w - _width(v)) for v, w in zip(r, widths)) + " |")
-        if n == 0:
-            print(line)
-    print(line)
+    print("\n".join(format_table(rows)))
     print(f"경고     : {'; '.join(doc.extract_warnings) if doc.extract_warnings else '없음'}")
 
 
