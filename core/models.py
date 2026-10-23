@@ -69,3 +69,22 @@ class CoaResult(BaseModel):
     spec_version: str | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
     processed_at: datetime = Field(default_factory=datetime.now)
+
+
+class SavedFiles(BaseModel):
+    """저장 결과: DB 문서 ID와 생성 파일 경로. 저장 중 실패한 단계는 errors에 남긴다(판정 결과는 유지)."""
+
+    document_id: int | None = None
+    pdf: Path | None = None
+    result_xlsx: Path | None = None
+    erp_xlsx: Path | None = None
+    notice: Path | None = None
+    errors: list[str] = Field(default_factory=list)
+
+
+class ProcessOutput(BaseModel):
+    """process_pdf() 반환값. 이미 처리한 메일 첨부면 skipped=True, result=None."""
+
+    result: CoaResult | None = None
+    saved: SavedFiles | None = None
+    skipped: bool = False

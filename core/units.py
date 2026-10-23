@@ -97,6 +97,13 @@ def parse_value(raw: str | None) -> tuple[str, Decimal | None]:
     return INVALID, None
 
 
+def is_inclusive_bound(raw: str) -> bool:
+    """'≤x', '<=x' 처럼 x를 포함하는 부등호 표기인지 ('<x'는 False)."""
+    s = _clean(raw)
+    m = _LESS_PREFIX.match(s) or _GREATER_PREFIX.match(s)
+    return bool(m) and m.group(0) not in ("<", ">")
+
+
 def normalize_unit(raw_unit: str | None) -> str | None:
     """단위 원문을 표준 단위(%, ppm, ppb, g/kg, APHA)로 바꾼다. 모르는 단위·빈 값은 None."""
     if raw_unit is None:

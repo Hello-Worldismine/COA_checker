@@ -10,7 +10,7 @@ from core.models import CoaDocument, CoaResult, ExtractedItem, ItemResult, Statu
 from core.spec import SpecItem, SpecMaster
 from core.units import (
     GREATER_THAN, INVALID, LESS_THAN, NOT_DETECTED, RANGE,
-    convert, normalize_unit, parse_value,
+    convert, is_inclusive_bound, normalize_unit, parse_value,
 )
 
 
@@ -99,13 +99,20 @@ def judge_item(spec: SpecItem, item: ExtractedItem | None) -> ItemResult:
     shown = _qty(value, unit) if unit == spec.unit else f"{_qty(value, unit)} → {_qty(converted, spec.unit)} 환산"
 
     if kind == LESS_THAN:
+        inclusive = is_inclusive_bound(raw)
+        op = "≤" if inclusive else "<"
         if spec.lower is not None:
-            return review(f"'<{fmt(value)}' 표기 - 하한이 있는 항목이라 실제 값 확인 필요")
+            # '<x'는 x ≤ 하한, '≤x'는 x < 하한이면 실제 값이 하한 미만으로 확정된다
+            if converted < spec.lower or (converted == spec.lower and not inclusive):
+                result.status = Status.FAIL
+                result.reason = f"{op}{shown}, 하한 {_qty(spec.lower, spec.unit)} 미달 확정"
+                return result
+            return review(f"{op}{shown}, 하한 {_qty(spec.lower, spec.unit)} 이상인지 알 수 없어 확인 필요")
         if converted <= spec.upper:
             result.status = Status.PASS
-            result.reason = f"<{shown}, 상한 {_qty(spec.upper, spec.unit)} 이하"
+            result.reason = f"{op}{shown}, 상한 {_qty(spec.upper, spec.unit)} 이하"
             return result
-        return review(f"<{shown}, 표기 한계가 상한 {_qty(spec.upper, spec.unit)}보다 커서 실제 값 확인 필요")
+        return review(f"{op}{shown}, 표기 한계가 상한 {_qty(spec.upper, spec.unit)}보다 커서 실제 값 확인 필요")
 
     result.status, verdict = _compare(converted, spec)
     result.reason = f"{shown}, {verdict}"

@@ -32,7 +32,7 @@ def item(value, unit="%", name="X"):
 def test_samples_match_expected(spec_master, file_name):
     """문서 판정·항목별 판정이 expected.json과 일치한다."""
     exp = EXPECTED[file_name]
-    result = process_pdf(SAMPLES_DIR / file_name, spec=spec_master)
+    result = process_pdf(SAMPLES_DIR / file_name, spec=spec_master, save=False).result
     assert result.overall_status == exp["overall"]
     assert {r.item_std: r.status.value for r in result.item_results} == {
         k: v["status"] for k, v in exp["items"].items()
@@ -43,12 +43,12 @@ def test_samples_match_expected(spec_master, file_name):
 
 def test_sample_reasons(spec_master):
     """사유 문구: ppm 환산 부적합, N.D. 검토."""
-    fail = process_pdf(SAMPLES_DIR / "COA_Nippon_N2418_fail.pdf", spec=spec_master)
+    fail = process_pdf(SAMPLES_DIR / "COA_Nippon_N2418_fail.pdf", spec=spec_master, save=False).result
     moisture = next(r for r in fail.item_results if r.item_std == "Moisture")
     assert moisture.reason == "50 ppm → 0.005 % 환산, 상한 0.003 % 초과"
     assert moisture.normalized_value == D("0.005")
 
-    review = process_pdf(SAMPLES_DIR / "COA_Nippon_N2419_review.pdf", spec=spec_master)
+    review = process_pdf(SAMPLES_DIR / "COA_Nippon_N2419_review.pdf", spec=spec_master, save=False).result
     iron = next(r for r in review.item_results if r.item_std == "Iron")
     assert iron.reason == "N.D. 표기 - 검출한계 미기재로 검토 필요"
 
@@ -56,7 +56,7 @@ def test_sample_reasons(spec_master):
 def test_process_pdf_keeps_meta(spec_master):
     """메일 정보(meta)를 결과에 그대로 담는다."""
     meta = {"sender": "jaemin9905@naver.com", "entry_id": "ABC"}
-    result = process_pdf(SAMPLES_DIR / "COA_Alpha_A2401_pass.pdf", meta=meta, spec=spec_master)
+    result = process_pdf(SAMPLES_DIR / "COA_Alpha_A2401_pass.pdf", meta=meta, spec=spec_master, save=False).result
     assert result.meta == meta and result.overall_status is Status.PASS
 
 
@@ -96,7 +96,13 @@ def test_reason_texts():
     (MOISTURE, "<10", "ppm", Status.PASS, "상한 0.003 % 이하"),
     (MOISTURE, "≤ 0.003", "%", Status.PASS, "상한 0.003 % 이하"),
     (MOISTURE, "<50", "ppm", Status.REVIEW, "실제 값 확인 필요"),        # 표기 한계가 상한보다 큼
-    (BAND, "<0.8", "%", Status.REVIEW, "하한이 있는 항목"),
+    (BAND, "<0.8", "%", Status.REVIEW, "하한 0.5 % 이상인지 알 수 없어"),   # x > 하한
+    (BAND, "<0.4", "%", Status.FAIL, "하한 0.5 % 미달 확정"),               # x < 하한
+    (BAND, "<0.5", "%", Status.FAIL, "미달 확정"),                          # '<x', x = 하한 → 미만 확정
+    (BAND, "≤0.5", "%", Status.REVIEW, "확인 필요"),                       # '≤x', x = 하한 → 하한과 같을 수 있음
+    (BAND, "<= 0.4", "%", Status.FAIL, "≤0.4 %"),
+    (PURITY, "<99.5", "%", Status.FAIL, "하한 99.9 % 미달 확정"),
+    (PURITY, "<99.95", "%", Status.REVIEW, "확인 필요"),
     (MOISTURE, "N.D.", None, Status.REVIEW, "검출한계 미기재"),
     (MOISTURE, "Not Detected", "ppm", Status.REVIEW, "검출한계 미기재"),
     (MOISTURE, ">5", "ppm", Status.REVIEW, "실제 값을 알 수 없어"),
@@ -154,6 +160,15 @@ def test_fail_beats_review(spec_master):
     items = [item("99.95", "%", "Purity"), item("50", "ppm", "Water"), item("N.D.", None, "Fe")]
     result = judge(_doc(items), spec_master)
     assert result.overall_status is Status.FAIL
+
+
+def test_warning_does_not_downgrade_fail(spec_master):
+    """추출 경고는 PASS를 REVIEW로만 올린다. FAIL 항목이 있으면 경고가 있어도 FAIL."""
+    fail_items = GOOD[:2] + [item("0.008", "%", "Iron"), GOOD[3]]
+    result = judge(_doc(fail_items, warnings=["Lot No.를 찾지 못함"]), spec_master)
+    assert result.overall_status is Status.FAIL
+    assert result.reasons == ["Lot No.를 찾지 못함"]
+    assert judge(_doc(GOOD, warnings=["Lot No.를 찾지 못함"]), spec_master).overall_status is Status.REVIEW
 
 
 def test_duplicate_item_review(spec_master):

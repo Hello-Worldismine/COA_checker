@@ -1,31 +1,53 @@
 """process_pdf(): 추출 → 매핑 → 환산 → 판정 → 저장을 묶는 단일 진입점.
 
-메일 경로·폴더 감시·수동 업로드 모두 이 함수를 호출한다. (저장은 다음 단계에서 추가)
-실행: python -m core.pipeline samples\\COA_Nippon_N2418_fail.pdf
+메일 경로·폴더 감시·수동 업로드 모두 이 함수를 호출한다.
+실행: python -m core.pipeline samples\\COA_Nippon_N2418_fail.pdf          (판정표만 출력)
+      python -m core.pipeline --save samples\\COA_Nippon_N2418_fail.pdf   (DB·엑셀·통보서까지 저장)
 """
 
+import argparse
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
+from core.config import load_config
 from core.extractor import extract, format_table
 from core.judge import fmt, judge, limit_text
-from core.models import CoaResult, Status
+from core.models import CoaResult, ProcessOutput, Status
+from core.reporter import is_processed, save_all
 from core.spec import SpecMaster, load_spec_master
+
+log = logging.getLogger(__name__)
 
 STATUS_LABEL = {Status.PASS: "적합", Status.FAIL: "부적합", Status.REVIEW: "검토 필요"}
 ANSI = {Status.FAIL: "\033[1;97;41m", Status.REVIEW: "\033[1;30;43m", Status.PASS: "\033[32m"}
 ANSI_RESET = "\033[0m"
 
 
-def process_pdf(pdf_path: Path | str, meta: dict[str, Any] | None = None,
-                spec: SpecMaster | None = None) -> CoaResult:
-    """PDF 1장을 추출하고 규격 판정한 CoaResult를 반환한다. meta는 결과에 그대로 담는다(메일 발신자·수신시각·EntryID 등)."""
+def process_pdf(pdf_path: Path | str, meta: dict[str, Any] | None = None, spec: SpecMaster | None = None,
+                save: bool = True, paths: dict[str, Path] | None = None) -> ProcessOutput:
+    """PDF 1장을 추출·판정하고 저장까지 한다. CoaResult와 생성 파일 경로(saved)를 반환한다.
+
+    meta 키: source("mail"/"folder"/"upload"), mail_entry_id, attachment_name, sender, received_at.
+    같은 메일 EntryID의 같은 첨부를 이미 처리했으면 아무것도 하지 않고 skipped=True.
+    paths를 주지 않으면 config.toml의 [paths]를 쓴다(테스트는 임시 폴더를 넘긴다).
+    """
+    meta = dict(meta or {})
+    paths = paths or load_config()["paths"]
+    entry_id = meta.get("mail_entry_id")
+    if save and entry_id and is_processed(paths["db"], entry_id, meta.get("attachment_name")):
+        log.info("이미 처리한 메일 첨부라 건너뜀: %s", meta.get("attachment_name") or pdf_path)
+        return ProcessOutput(skipped=True)
+
     spec = spec or load_spec_master()
     result = judge(extract(pdf_path, spec), spec)
-    result.meta = dict(meta or {})
-    return result
+    result.meta = meta
+    if not save:
+        return ProcessOutput(result=result)
+    saved = save_all(result, Path(pdf_path), paths)
+    return ProcessOutput(result=result, saved=saved, skipped=saved.document_id is None)
 
 
 def _paint(text: str, status: Status, color: bool) -> str:
@@ -60,19 +82,27 @@ def print_result(result: CoaResult, color: bool = False) -> None:
 
 
 def main(argv: list[str]) -> int:
-    """명령줄: PDF 경로들을 판정해 판정표를 출력한다."""
+    """명령줄: PDF 경로들을 판정해 판정표를 출력한다. --save면 수동 업로드로 저장까지 한다."""
     sys.stdout.reconfigure(encoding="utf-8")
-    if not argv:
-        print("사용법: python -m core.pipeline <PDF 경로> [<PDF 경로> ...]")
-        return 2
+    parser = argparse.ArgumentParser(prog="python -m core.pipeline", description="COA PDF 판정")
+    parser.add_argument("pdfs", nargs="+", help="판정할 PDF 경로")
+    parser.add_argument("--save", action="store_true", help="DB·결과 엑셀·ERP 양식·통보서까지 저장")
+    args = parser.parse_args(argv)
     color = sys.stdout.isatty()
     if color and os.name == "nt":
         os.system("")  # 윈도우 콘솔에서 ANSI 색 사용 켜기
     spec = load_spec_master()
-    for n, path in enumerate(argv):
+    for n, path in enumerate(args.pdfs):
         if n:
             print()
-        print_result(process_pdf(path, spec=spec), color)
+        out = process_pdf(path, {"source": "upload"}, spec=spec, save=args.save)
+        print_result(out.result, color)
+        if out.saved:
+            s = out.saved
+            print(f"저장     : DB id={s.document_id}, 보관 PDF={s.pdf}")
+            print(f"           결과 엑셀={s.result_xlsx}, ERP 양식={s.erp_xlsx}, 통보서={s.notice or '-'}")
+            for err in s.errors:
+                print(f"[주의] {err}")
     return 0
 
 
