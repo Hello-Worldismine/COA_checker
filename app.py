@@ -304,5 +304,8 @@ def main() -> None:
     with tab_history:
         history_panel(db)
 
+    st.divider()
+    st.caption(f"DB 파일: {db}")  # 감시 프로그램 로그 첫 줄의 DB 경로와 같은지 확인용
+
 
 main()

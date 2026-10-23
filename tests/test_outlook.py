@@ -296,6 +296,20 @@ def test_handle_mail_five_attachments(cfg, spec_master):
     assert _docs(cfg) == 5 and len(alerts) == 1
 
 
+def test_marked_mail_not_reprocessed_after_db_reset(cfg, spec_master):
+    """DB를 지워도(reset_demo) 처리 완료 분류가 달린 메일은 다시 처리하지 않는다 (녹화 시작 시 재처리 방지)."""
+    mail = FakeMail(attachments=[pdf()], categories="COA검증완료")
+    alerts, calls = [], []
+
+    def spy(path, meta, spec, paths):
+        calls.append(path)
+        return process_pdf(path, meta, spec=spec, paths=paths)
+
+    assert not cfg["paths"]["db"].exists()
+    assert mail_watcher.handle_mail(mail, _ctx(cfg, spec_master, alerts, spy)) == "skipped"
+    assert calls == [] and alerts == [] and not cfg["paths"]["inbox"].exists()
+
+
 def test_handle_mail_partial_failure_retries_rest(cfg, spec_master):
     """첨부 하나가 실패하면 나머지는 처리하고 분류를 달지 않는다. 다음 실행 때 실패한 것만 다시 처리."""
     names = ["COA_Alpha_A2401_pass.pdf", "COA_Nippon_N2418_fail.pdf"]

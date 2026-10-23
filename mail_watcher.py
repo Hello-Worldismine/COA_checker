@@ -386,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_config()
     setup_logging(cfg["paths"]["logs"])
+    log.info("DB 파일: %s", cfg["paths"]["db"])  # 화면 하단의 DB 경로와 같은지 확인용
     mode = args.mode or cfg["watch"]["mode"]
     return run_folder(cfg, args.once) if mode == "folder" else run_outlook(cfg, args.once)
 

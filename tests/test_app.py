@@ -100,6 +100,7 @@ def test_app_renders_all_tabs(demo_env):
     html_text = "".join(m.value for m in at.markdown)
     assert "N2418" in html_text and "badge fail" in html_text
     assert "50 ppm" in html_text and "상한 0.003 % 초과" in html_text or "검출한계 미기재" in html_text
+    assert any(c.value == f"DB 파일: {demo_env['db']}" for c in at.caption)  # 화면 하단 DB 경로
 
 
 def test_app_without_db(tmp_path, monkeypatch):

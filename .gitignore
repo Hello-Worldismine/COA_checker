@@ -10,3 +10,7 @@ logs/*
 !inbox/.gitkeep
 !output/.gitkeep
 !logs/.gitkeep
+
+# 개인·도구 파일
+samples.zip
+.claude/
