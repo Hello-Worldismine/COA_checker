@@ -26,6 +26,9 @@ from core.spec import load_spec_master
 log = logging.getLogger("mail_watcher")
 
 MAX_RETRIES = 3          # 같은 메일이 이 횟수만큼 실패하면 이번 실행 동안은 더 시도하지 않는다
+ATTACH_WAIT_SECONDS = 30  # 새 메일인데 PDF가 0개로 보이면 첨부 동기화를 이 시간까지 기다린다
+ATTACH_WAIT_STEP = 3
+FRESH_MAIL = timedelta(minutes=5)
 RESCAN_MARGIN = timedelta(minutes=10)
 NEW_MAIL_IDS: "queue.Queue[str]" = queue.Queue()
 
@@ -53,7 +56,29 @@ class Context:
     alert: Callable[[outlook.Alert], None]
     process: Callable = process_pdf
     load_spec: Callable = load_spec_master
+    refetch: Callable = lambda mail: mail          # 메일을 다시 읽어 최신 첨부 상태를 얻는다
+    sleep: Callable[[float], None] = time.sleep    # 기다리는 동안 Outlook 메시지를 처리하는 sleep으로 바꿔 끼운다
+    now: Callable[[], datetime] = datetime.now
     failures: dict[str, int] = field(default_factory=dict)
+
+
+def wait_for_pdf(mail, ctx: Context, spec, check: outlook.MailCheck):
+    """새 메일이거나 '첨부 있음' 표시가 있는데 PDF가 0개로 보이면, 3초 간격으로 최대 30초 다시 확인한다."""
+    fresh = ctx.now() - outlook.received_at(mail) <= FRESH_MAIL
+    if not (fresh or outlook.has_attach_flag(mail)):
+        return mail, check
+    log.info("PDF 첨부가 아직 안 보여 최대 %d초 기다립니다: '%s' (%s)", ATTACH_WAIT_SECONDS, mail.Subject,
+             outlook.describe_attachments(mail))
+    waited = 0
+    while waited < ATTACH_WAIT_SECONDS:
+        ctx.sleep(ATTACH_WAIT_STEP)
+        waited += ATTACH_WAIT_STEP
+        mail = ctx.refetch(mail)
+        check = outlook.check_mail(mail, spec, ctx.config)
+        if check.pdf_count:
+            log.info("%d초 뒤 PDF 첨부 %d개 확인", waited, check.pdf_count)
+            break
+    return mail, check
 
 
 def handle_mail(mail, ctx: Context) -> str:
@@ -76,21 +101,30 @@ def handle_mail(mail, ctx: Context) -> str:
     subject, received = mail.Subject or "", outlook.received_at(mail)
 
     if check.pdf_count == 0:
-        if check.known_sender:
-            log.info("COA 메일에 PDF 첨부 없음 → 담당자 알림: '%s' (%s)", subject, check.sender)
-            ctx.alert(outlook.build_no_pdf_alert(subject, check.sender, received))
-        else:
-            log.info("제목 키워드만 맞고 PDF 없음 → 로그만 남김: '%s' (%s)", subject, check.sender)
-        outlook.mark_processed(mail, category)
-        return "no_pdf"
+        mail, check = wait_for_pdf(mail, ctx, spec, check)
+    if check.pdf_count == 0:
+        detail = outlook.describe_attachments(mail)
+        if mail.Attachments.Count == 0 and outlook.has_attach_flag(mail):
+            # 서버에는 첨부가 있는데 이 PC에 아직 안 내려온 상태: '첨부 없음'으로 확정하지 않고 다음에 다시 본다
+            log.warning("첨부가 아직 동기화되지 않아 미처리로 남김(다음 확인 때 다시 처리): '%s' (%s) - %s",
+                        subject, check.sender, detail)
+            return "pending"
+        return no_pdf(mail, ctx, check, detail)
 
     entry_id = mail.EntryID
     db = cfg["paths"]["db"]
     log.info("COA 메일 감지: '%s' (%s, PDF %d개)", subject, check.sender, check.pdf_count)
+    report: dict[str, int] = {}
     saved = outlook.save_pdf_attachments(
         mail, cfg["paths"]["inbox"], outlook.sender_label(check.sender, spec),
-        skip=lambda key: is_processed(db, entry_id, key),
+        skip=lambda key: is_processed(db, entry_id, key), report=report,
     )
+    if not saved and not report.get("skipped"):
+        detail = outlook.describe_attachments(mail)
+        if report.get("failed"):
+            log.warning("PDF 첨부를 저장하지 못해 미처리로 남김: '%s' - %s", subject, detail)
+            return "partial"
+        return no_pdf(mail, ctx, check, detail)  # 후보가 모두 PDF가 아니었음
 
     outputs, failures = [], []
     for key, path in saved:
@@ -126,6 +160,18 @@ def handle_mail(mail, ctx: Context) -> str:
     return "done"
 
 
+def no_pdf(mail, ctx: Context, check: outlook.MailCheck, detail: str) -> str:
+    """PDF 없는 COA 메일: 등록 발신자면 담당자 알림, 제목 키워드만 맞으면 로그만. 둘 다 처리 완료 분류."""
+    subject = mail.Subject or ""
+    if check.known_sender:
+        log.info("COA 메일에 PDF 첨부 없음 → 담당자 알림: '%s' (%s) - %s", subject, check.sender, detail)
+        ctx.alert(outlook.build_no_pdf_alert(subject, check.sender, outlook.received_at(mail)))
+    else:
+        log.info("제목 키워드만 맞고 PDF 없음 → 로그만 남김: '%s' (%s) - %s", subject, check.sender, detail)
+    outlook.mark_processed(mail, ctx.config["mail"]["processed_category"])
+    return "no_pdf"
+
+
 def safe_handle(mail, ctx: Context) -> str:
     """handle_mail을 예외로부터 보호한다. 같은 메일이 계속 실패하면 MAX_RETRIES 후 이번 실행에서는 포기."""
     entry_id = getattr(mail, "EntryID", "?")
@@ -136,7 +182,7 @@ def safe_handle(mail, ctx: Context) -> str:
     except Exception:
         log.exception("메일 처리 중 오류 - 미처리로 남김: '%s'", getattr(mail, "Subject", "?"))
         status = "error"
-    if status in ("error", "partial"):
+    if status in ("error", "partial", "pending"):
         ctx.failures[entry_id] = ctx.failures.get(entry_id, 0) + 1
         if ctx.failures[entry_id] >= MAX_RETRIES:
             log.error("같은 메일이 %d번 실패해 이번 실행에서는 더 시도하지 않습니다. 로그를 확인하세요: '%s'",
@@ -159,7 +205,7 @@ def scan_inbox(ns, inbox, ctx: Context, since: datetime) -> int:
     handled = 0
     for entry_id in reversed(entry_ids):  # 오래된 메일부터
         status = safe_handle(ns.GetItemFromID(entry_id), ctx)
-        handled += status in ("done", "partial", "no_pdf")
+        handled += status in ("done", "partial", "no_pdf", "pending")
     return handled
 
 
@@ -188,7 +234,15 @@ def run_outlook(cfg: dict, once: bool = False) -> int:
         return 1
     account = outlook.find_account(ns, cfg["mail"].get("account", ""))
     outlook.ensure_category(ns, cfg["mail"]["processed_category"])
-    ctx = Context(cfg, alert=lambda a: outlook.send_alert(app, a, cfg, account))
+    def pump_sleep(seconds: float) -> None:
+        """기다리는 동안에도 Outlook 메시지(새 메일 이벤트 등)를 처리한다."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            pythoncom.PumpWaitingMessages()
+            time.sleep(0.1)
+
+    ctx = Context(cfg, alert=lambda a: outlook.send_alert(app, a, cfg, account),
+                  refetch=lambda m: ns.GetItemFromID(m.EntryID), sleep=pump_sleep)
 
     alert_to = ", ".join(cfg["alert"].get("to", [])) or "(없음)"
     log.info("메일 감시 시작: 계정=%s, 받은편지함='%s', 알림=%s → %s",

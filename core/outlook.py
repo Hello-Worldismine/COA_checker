@@ -26,6 +26,18 @@ OL_MAIL = 43           # MailItem.Class
 OL_BY_VALUE = 1        # 일반 첨부 파일
 PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 PR_SENDER_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x5D01001F"
+PR_ATTACH_LONG_FILENAME = "http://schemas.microsoft.com/mapi/proptag/0x3707001F"
+PR_ATTACH_MIME_TAG = "http://schemas.microsoft.com/mapi/proptag/0x370E001F"
+PR_HASATTACH = "http://schemas.microsoft.com/mapi/proptag/0x0E1B000B"
+
+PDF = "pdf"            # 이름·MIME으로 PDF 확정
+MAYBE = "maybe"        # 애매함 → 저장 후 파일 머리 '%PDF'로 최종 판정
+NOT_PDF = "no"
+GENERIC_MIME = {"", "application/octet-stream", "binary/octet-stream", "application/x-download",
+                "application/download", "application/force-download", "application/unknown"}
+NON_PDF_EXT = {".xlsx", ".xls", ".xlsm", ".csv", ".doc", ".docx", ".ppt", ".pptx", ".txt", ".jpg", ".jpeg",
+               ".png", ".gif", ".bmp", ".tif", ".tiff", ".zip", ".7z", ".msg", ".eml", ".htm", ".html", ".xml",
+               ".ics", ".vcf", ".p7s"}
 
 CELL_COLOR = {Status.FAIL: "#FFC7CE", Status.REVIEW: "#FFEB9C", Status.PASS: "#C6EFCE"}
 ALERT_SUBJECT_PREFIX = "[COA "  # 우리가 보내는 알림 제목 머리. 이 제목의 메일은 다시 감지하지 않는다.
@@ -54,14 +66,79 @@ def received_at(mail) -> datetime:
     return datetime(t.year, t.month, t.day, t.hour, t.minute, t.second)
 
 
-def pdf_attachments(mail) -> list:
-    """일반 첨부 중 .pdf 파일만."""
-    result = []
-    for i in range(1, mail.Attachments.Count + 1):
+def _safe(get, default=""):
+    """COM 속성 읽기가 실패해도 기본값을 돌려준다."""
+    try:
+        value = get()
+        return default if value is None else value
+    except Exception:
+        return default
+
+
+def attachment_names(att) -> list[str]:
+    """첨부의 이름 후보: FileName, DisplayName, PR_ATTACH_LONG_FILENAME (빈 값 제외, 중복 제거)."""
+    names = [_safe(lambda: att.FileName), _safe(lambda: att.DisplayName),
+             _safe(lambda: att.PropertyAccessor.GetProperty(PR_ATTACH_LONG_FILENAME))]
+    return list(dict.fromkeys(str(n).strip() for n in names if str(n).strip()))
+
+
+def attachment_mime(att) -> str:
+    """첨부 MIME 타입(PR_ATTACH_MIME_TAG, 소문자). 없으면 ""."""
+    return str(_safe(lambda: att.PropertyAccessor.GetProperty(PR_ATTACH_MIME_TAG))).strip().lower()
+
+
+def attachment_kind(att) -> tuple[str, str]:
+    """첨부가 PDF인지 판정: (PDF / MAYBE / NOT_PDF, 사유). 첨부 Type만으로는 제외하지 않는다."""
+    names, mime = attachment_names(att), attachment_mime(att)
+    pdf_name = next((n for n in names if n.lower().endswith(".pdf")), None)
+    if pdf_name:
+        return PDF, f"이름 '{pdf_name}'"
+    if mime == "application/pdf":
+        return PDF, "MIME application/pdf"
+    exts = {Path(n).suffix.lower() for n in names if Path(n).suffix}
+    if exts & NON_PDF_EXT:
+        return NOT_PDF, f"확장자 {', '.join(sorted(exts))}, MIME {mime or '-'}"
+    if mime in GENERIC_MIME:
+        return MAYBE, f"이름·MIME으로 알 수 없음(MIME {mime or '-'}) → 저장 후 파일 머리로 확인"
+    return NOT_PDF, f"MIME {mime}"
+
+
+def describe_attachments(mail) -> str:
+    """로그용: 첨부 개수와 각 첨부의 이름·Type·MIME·판정."""
+    count = _safe(lambda: mail.Attachments.Count, 0)
+    parts = [f"첨부 {count}개"]
+    for i in range(1, count + 1):
         att = mail.Attachments.Item(i)
-        if att.Type == OL_BY_VALUE and str(att.FileName).lower().endswith(".pdf"):
+        kind, why = attachment_kind(att)
+        parts.append(f"[{i}] 이름={attachment_names(att) or ['-']} Type={_safe(lambda: att.Type, '?')} "
+                     f"MIME={attachment_mime(att) or '-'} → {kind} ({why})")
+    if count == 0 and has_attach_flag(mail):
+        parts.append("메일에 '첨부 있음' 표시(PR_HASATTACH)가 있으나 첨부가 0개로 보임 - 첨부 동기화 대기 또는 정크 처리 의심")
+    return "; ".join(parts)
+
+
+def has_attach_flag(mail) -> bool:
+    """메일 속성상 첨부가 있다고 표시돼 있는지(PR_HASATTACH). 읽을 수 없으면 False."""
+    return bool(_safe(lambda: mail.PropertyAccessor.GetProperty(PR_HASATTACH), False))
+
+
+def pdf_attachments(mail) -> list:
+    """PDF 후보 첨부(PDF 확정 + 애매한 것). 애매한 것은 저장할 때 파일 머리로 최종 판정한다."""
+    result = []
+    for i in range(1, _safe(lambda: mail.Attachments.Count, 0) + 1):
+        att = mail.Attachments.Item(i)
+        if attachment_kind(att)[0] != NOT_PDF:
             result.append(att)
     return result
+
+
+def is_pdf_file(path: Path) -> bool:
+    """파일 앞 4바이트가 '%PDF'인지."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"%PDF"
+    except OSError:
+        return False
 
 
 def _domain_match(domain: str, allowed: str) -> bool:
@@ -146,25 +223,44 @@ def attachment_key(original: str, occurrence: int) -> str:
     return original if occurrence == 1 else f"{original}#{occurrence}"
 
 
-def save_pdf_attachments(mail, inbox_dir: Path, label: str, skip=None) -> list[tuple[str, Path]]:
+def save_pdf_attachments(mail, inbox_dir: Path, label: str, skip=None,
+                         report: dict[str, int] | None = None) -> list[tuple[str, Path]]:
     """PDF 첨부를 inbox/{YYYYMMDD}/ 표준 이름으로 저장하고 [(첨부 키, 경로)]를 반환한다.
 
     skip(첨부 키)가 True인 첨부(이미 처리됨)는 저장하지 않는다. 같은 메일을 다시 처리하면 같은 경로에 덮어쓴다.
+    report를 주면 건너뜀(skipped)·저장 실패(failed)·PDF 아님(not_pdf) 개수를 채운다.
     """
+    report = report if report is not None else {}
+    for k in ("skipped", "failed", "not_pdf"):
+        report.setdefault(k, 0)
     received = received_at(mail)
     folder = inbox_dir / f"{received:%Y%m%d}"
     seen: dict[str, int] = {}
     saved = []
     for att in pdf_attachments(mail):
-        original = str(att.FileName)
+        kind, why = attachment_kind(att)
+        names = attachment_names(att)
+        original = next((n for n in names if n.lower().endswith(".pdf")), names[0] if names else "attachment")
         seen[original.lower()] = seen.get(original.lower(), 0) + 1
         key = attachment_key(original, seen[original.lower()])
         if skip and skip(key):
             log.info("이미 처리한 첨부라 건너뜀: %s", key)
+            report["skipped"] += 1
             continue
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / attachment_filename(received, label, original, seen[original.lower()])
-        att.SaveAsFile(str(path))
+        try:
+            att.SaveAsFile(str(path))
+        except Exception as exc:
+            log.warning("첨부 저장 실패로 제외: %s (Type=%s, %s) - %s", original, _safe(lambda: att.Type, "?"), why, exc)
+            path.unlink(missing_ok=True)
+            report["failed"] += 1
+            continue
+        if kind == MAYBE and not is_pdf_file(path):
+            log.info("PDF가 아니어서 제외(파일 머리 '%%PDF' 없음): %s", original)
+            path.unlink(missing_ok=True)
+            report["not_pdf"] += 1
+            continue
         saved.append((key, path))
     return saved
 

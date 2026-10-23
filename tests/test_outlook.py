@@ -16,14 +16,36 @@ SAMPLES_DIR = load_config()["paths"]["samples"]
 RECEIVED = datetime(2026, 10, 23, 9, 30, 15, tzinfo=timezone.utc)  # pywin32처럼 로컬 시각에 UTC 표시
 
 
+class FakePropertyAccessor:
+    """PropertyAccessor 흉내: 없는 속성은 예외."""
+
+    def __init__(self, props):
+        self.props = props
+
+    def GetProperty(self, tag):
+        if self.props.get(tag) is None:
+            raise Exception("속성 없음")
+        return self.props[tag]
+
+
 class FakeAttachment:
     """Outlook Attachment 흉내."""
 
-    def __init__(self, file_name, source=None, att_type=outlook.OL_BY_VALUE):
+    def __init__(self, file_name, source=None, att_type=outlook.OL_BY_VALUE, display_name=None, long_name=None,
+                 mime=None, content=None, save_error=False):
         self.FileName, self.Type, self.source = file_name, att_type, source
+        self.DisplayName = display_name if display_name is not None else file_name
+        self.content, self.save_error = content, save_error
+        self.PropertyAccessor = FakePropertyAccessor({outlook.PR_ATTACH_LONG_FILENAME: long_name,
+                                                      outlook.PR_ATTACH_MIME_TAG: mime})
 
     def SaveAsFile(self, path):
-        Path(path).write_bytes(Path(self.source).read_bytes() if self.source else b"%PDF-1.4 fake")
+        if self.save_error:
+            raise Exception("저장 실패(차단된 첨부)")
+        if self.content is not None:
+            Path(path).write_bytes(self.content)
+        else:
+            Path(path).write_bytes(Path(self.source).read_bytes() if self.source else b"%PDF-1.4 fake")
 
 
 class FakeAttachments:
@@ -50,7 +72,7 @@ class FakeMail:
     """Outlook MailItem 흉내."""
 
     def __init__(self, subject="COA N2418", sender="jaemin9905@naver.com", attachments=(), sender_type="SMTP",
-                 cls=outlook.OL_MAIL, entry_id="ENTRY-1", categories=""):
+                 cls=outlook.OL_MAIL, entry_id="ENTRY-1", categories="", has_attach=None):
         self.Class, self.Subject, self.EntryID = cls, subject, entry_id
         self.SenderEmailType = sender_type
         self.SenderEmailAddress = sender if sender_type != "EX" else "/O=COMPANY/OU=EXCHANGE/CN=RECIPIENTS/CN=KIM"
@@ -59,6 +81,7 @@ class FakeMail:
         self.ReceivedTime = RECEIVED
         self.Categories = categories
         self.saved = 0
+        self.PropertyAccessor = FakePropertyAccessor({outlook.PR_HASATTACH: has_attach})
 
     def Save(self):
         self.saved += 1
@@ -90,7 +113,7 @@ def cfg(tmp_path):
     ("자료", "someone@gmail.com", [pdf()], False),                  # 키워드·발신자 모두 아님
     ("COA N2418", "qc@alpha-chem.example", [], False),              # PDF 없음
     ("COA", "qc@alpha-chem.example", [FakeAttachment("a.xlsx")], False),
-    ("COA", "qc@alpha-chem.example", [FakeAttachment("logo.pdf", att_type=6)], False),  # 본문 삽입 개체
+    ("COA", "qc@alpha-chem.example", [FakeAttachment("logo.pdf", att_type=6)], True),   # Type만으로 제외 안 함
     ("자료", "evil-alpha-chem.example@x.com", [pdf()], False),
     ("[COA 부적합] Nippon Solvent / N2418", "adm1nsubin@outlook.kr", [pdf()], False),   # 우리가 보낸 알림
     ("[COA 검토 필요] Nippon Solvent / N2419", "jaemin9905@naver.com", [pdf()], False),
@@ -99,6 +122,45 @@ def cfg(tmp_path):
 def test_is_coa_mail(spec_master, cfg, subject, sender, attachments, expected):
     """(제목 키워드 OR 협력사/허용 도메인/시연 발신자) AND PDF 첨부."""
     assert outlook.is_coa_mail(FakeMail(subject, sender, attachments), spec_master, cfg) is expected
+
+
+@pytest.mark.parametrize("att, kind", [
+    (FakeAttachment("COA_N2418.PDF"), outlook.PDF),                                        # 확장자 대문자
+    (FakeAttachment("COA_N2418", display_name="COA_N2418.pdf"), outlook.PDF),             # DisplayName에만 .pdf
+    (FakeAttachment("COA~1.PD_", long_name="COA_Nippon_N2418_fail.pdf"), outlook.PDF),     # 긴 파일명에만 .pdf
+    (FakeAttachment("ATT00001", mime="application/pdf"), outlook.PDF),                    # MIME만 pdf
+    (FakeAttachment("ATT00002", mime="application/octet-stream"), outlook.MAYBE),         # 애매함
+    (FakeAttachment("noname"), outlook.MAYBE),
+    (FakeAttachment("spec.xlsx", mime="application/octet-stream"), outlook.NOT_PDF),
+    (FakeAttachment("photo", mime="image/png"), outlook.NOT_PDF),
+])
+def test_attachment_kind(att, kind):
+    """FileName·DisplayName·긴 파일명 중 하나라도 .pdf이거나 MIME이 pdf면 PDF, 애매하면 MAYBE."""
+    assert outlook.attachment_kind(att)[0] == kind
+
+
+def test_save_verifies_ambiguous_and_skips_failed(tmp_path):
+    """애매한 첨부는 파일 머리 '%PDF'로 최종 판정, 저장 실패한 첨부만 제외하고 사유를 센다."""
+    atts = [
+        FakeAttachment("ATT00001", mime="application/octet-stream", content=b"%PDF-1.7 real"),
+        FakeAttachment("ATT00002", mime="application/octet-stream", content=b"PK zip"),
+        FakeAttachment("blocked.pdf", save_error=True),
+        FakeAttachment("COA.PDF", att_type=6, content=b"%PDF-1.4"),
+    ]
+    report = {}
+    saved = outlook.save_pdf_attachments(FakeMail(attachments=atts), tmp_path, "X", report=report)
+    assert [k for k, _ in saved] == ["ATT00001", "COA.PDF"]
+    assert report == {"skipped": 0, "failed": 1, "not_pdf": 1}
+    assert sorted(p.name for p in (tmp_path / "20261023").iterdir()) == \
+        ["20261023_093015_X_ATT00001.pdf", "20261023_093015_X_COA.pdf"]
+
+
+def test_describe_attachments_for_log():
+    """'PDF 첨부 없음' 로그에 첨부 개수·이름·Type·MIME이 남는다."""
+    mail = FakeMail(attachments=[FakeAttachment("spec.xlsx", mime="application/vnd.ms-excel")])
+    text = outlook.describe_attachments(mail)
+    assert "첨부 1개" in text and "spec.xlsx" in text and "Type=1" in text and "application/vnd.ms-excel" in text
+    assert "PR_HASATTACH" in outlook.describe_attachments(FakeMail(has_attach=True))
 
 
 def test_non_mail_item_ignored(spec_master, cfg):
@@ -201,11 +263,13 @@ def test_summary_line(spec_master):
 
 
 # ── 메일 1통 처리 흐름 (mail_watcher.handle_mail) ─────────────────
-def _ctx(cfg, spec_master, alerts, process=process_pdf):
+def _ctx(cfg, spec_master, alerts, process=process_pdf, **kwargs):
     def run(path, meta, spec):
         return process(path, meta, spec=spec, paths=cfg["paths"])
 
-    return mail_watcher.Context(cfg, alert=alerts.append, process=run, load_spec=lambda: spec_master)
+    kwargs.setdefault("now", lambda: datetime(2026, 10, 24))  # 기본은 '새 메일 아님' → 첨부 대기 없음
+    kwargs.setdefault("sleep", lambda s: None)
+    return mail_watcher.Context(cfg, alert=alerts.append, process=run, load_spec=lambda: spec_master, **kwargs)
 
 
 def _docs(cfg):
@@ -263,6 +327,57 @@ def test_handle_mail_no_pdf(cfg, spec_master):
     reply = FakeMail("RE: COA 문의", "colleague@company.co.kr")
     assert mail_watcher.handle_mail(reply, _ctx(cfg, spec_master, alerts)) == "no_pdf"
     assert len(alerts) == 1 and reply.Categories == "COA검증완료"
+
+
+def test_delayed_attachment_sync(cfg, spec_master):
+    """새 메일 직후 PDF가 0개로 보여도 바로 '첨부 없음'으로 판정하지 않고, 다시 읽어 PDF가 보이면 처리한다."""
+    mail = FakeMail()
+    alerts, sleeps, reads = [], [], []
+
+    def refetch(m):
+        reads.append(1)
+        if len(reads) == 3:  # 9초 뒤 첨부가 내려옴
+            m.Attachments = FakeAttachments([pdf()])
+        return m
+
+    ctx = _ctx(cfg, spec_master, alerts, now=lambda: datetime(2026, 10, 23, 9, 30, 20), sleep=sleeps.append,
+               refetch=refetch)
+    assert mail_watcher.handle_mail(mail, ctx) == "done"
+    assert sleeps == [3, 3, 3] and _docs(cfg) == 1
+    assert alerts[0].subject == "[COA 부적합] Nippon Solvent / N2418"
+
+
+def test_attachment_never_synced_stays_pending(cfg, spec_master):
+    """'첨부 있음' 표시인데 30초 동안 첨부가 0개면 '첨부 없음'으로 확정하지 않고 미처리로 남긴다."""
+    mail = FakeMail(has_attach=True)
+    alerts, sleeps = [], []
+    ctx = _ctx(cfg, spec_master, alerts, sleep=sleeps.append)
+    assert mail_watcher.handle_mail(mail, ctx) == "pending"
+    assert sum(sleeps) == mail_watcher.ATTACH_WAIT_SECONDS
+    assert alerts == [] and mail.Categories == ""
+
+
+def test_old_mail_without_pdf_no_wait(cfg, spec_master):
+    """오래된 메일에 첨부 표시도 없으면 기다리지 않고 바로 판정한다."""
+    sleeps = []
+    mail = FakeMail("COA 송부")
+    assert mail_watcher.handle_mail(mail, _ctx(cfg, spec_master, [], sleep=sleeps.append)) == "no_pdf"
+    assert sleeps == []
+
+
+def test_all_candidates_not_pdf_is_no_pdf(cfg, spec_master):
+    """애매한 첨부가 열어 보니 PDF가 아니면 'PDF 첨부 없음'으로 처리한다."""
+    alerts = []
+    mail = FakeMail(attachments=[FakeAttachment("ATT1", mime="application/octet-stream", content=b"GIF89a")])
+    assert mail_watcher.handle_mail(mail, _ctx(cfg, spec_master, alerts)) == "no_pdf"
+    assert alerts[0].subject.startswith("[COA 확인 필요] PDF 첨부 없음")
+
+
+def test_save_failure_stays_unprocessed(cfg, spec_master):
+    """PDF 저장이 실패하면 분류를 달지 않고 미처리로 남긴다."""
+    mail = FakeMail(attachments=[FakeAttachment("COA.pdf", save_error=True)])
+    assert mail_watcher.handle_mail(mail, _ctx(cfg, spec_master, [])) == "partial"
+    assert mail.Categories == ""
 
 
 def test_own_alert_mail_not_reprocessed(cfg, spec_master):
