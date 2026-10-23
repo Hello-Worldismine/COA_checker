@@ -15,6 +15,8 @@ py -3.12 -m venv .venv
 .venv\Scripts\python -m pytest
 ```
 
+설치 중 `UnicodeDecodeError: 'cp949' codec …` 오류가 나면 `python -X utf8 -m pip install -r requirements.txt`로 다시 실행하세요(가상환경에서는 `.venv\Scripts\python -X utf8 -m pip install -r requirements.txt`).
+
 Python 3.12.5가 없으면 [python.org](https://www.python.org/downloads/release/python-3125/)에서 Windows installer(64-bit)를 받아 설치합니다.
 
 ## 실행

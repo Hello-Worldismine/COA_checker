@@ -1,4 +1,4 @@
-# Python 3.12.5 기준. 직접 사용하는 패키지만 == 로 고정.
+# Python 3.12.5. Direct dependencies only, pinned with ==.
 pywin32==312
 pdfplumber==0.11.10
 pydantic==2.14.1
