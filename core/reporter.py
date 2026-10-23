@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS documents (
     overall_status  TEXT NOT NULL,
     reasons         TEXT,                   -- 문서 단위 검토 사유 ('; '로 연결)
     spec_version    TEXT,
+    result_xlsx     TEXT,                   -- 결과 엑셀 경로
+    notice_path     TEXT,                   -- 통보서 초안 경로 (FAIL만)
     UNIQUE (mail_entry_id, attachment_name) -- 같은 메일의 같은 첨부는 한 번만 (NULL은 중복 허용)
 );
 CREATE TABLE IF NOT EXISTS item_results (
@@ -58,7 +60,9 @@ CREATE TABLE IF NOT EXISTS item_results (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_lot ON documents(lot_no);
 CREATE INDEX IF NOT EXISTS idx_documents_entry ON documents(mail_entry_id);
+CREATE INDEX IF NOT EXISTS idx_documents_processed ON documents(processed_at);
 """
+ADDED_COLUMNS = {"result_xlsx": "TEXT", "notice_path": "TEXT"}  # STEP 8에서 추가: 기존 DB에도 열을 붙인다
 
 EXCLUDED = "EXCLUDED"
 FILL = {
@@ -103,12 +107,77 @@ def _as_datetime(value: Any) -> datetime | None:
 
 # ── SQLite ────────────────────────────────────────────────────
 def connect(db_path: Path) -> sqlite3.Connection:
-    """DB에 연결하고 테이블이 없으면 만든다."""
+    """쓰기용 연결. WAL 모드(쓰는 중에도 화면이 읽을 수 있음)로 열고, 테이블이 없으면 만든다."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 10000")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    have = {row[1] for row in conn.execute("PRAGMA table_info(documents)")}
+    for column, kind in ADDED_COLUMNS.items():
+        if column not in have:
+            conn.execute(f"ALTER TABLE documents ADD COLUMN {column} {kind}")
     return conn
+
+
+def connect_readonly(db_path: Path) -> sqlite3.Connection | None:
+    """화면 조회용 읽기 전용 연결 (DB가 없으면 None). 조회할 때만 짧게 열고 바로 닫는다."""
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=10)
+    conn.execute("PRAGMA busy_timeout = 10000")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def read_rows(db_path: Path, sql: str, params: tuple | list = ()) -> list[dict]:
+    """읽기 전용 쿼리 결과를 dict 목록으로 (DB가 없으면 빈 목록)."""
+    conn = connect_readonly(db_path)
+    if conn is None:
+        return []
+    with closing(conn):
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def search_documents(db_path: Path, supplier: str | None = None, lot: str | None = None,
+                     date_from: str | None = None, date_to: str | None = None,
+                     statuses: list[str] | None = None, limit: int | None = None) -> list[dict]:
+    """처리 이력 검색 (최근 처리 순). 날짜는 'YYYY-MM-DD', Lot은 부분 일치."""
+    where, args = [], []
+    if supplier:
+        where.append("supplier = ?")
+        args.append(supplier)
+    if lot:
+        where.append("lot_no LIKE ?")
+        args.append(f"%{lot.strip()}%")
+    if date_from:
+        where.append("substr(processed_at, 1, 10) >= ?")
+        args.append(date_from)
+    if date_to:
+        where.append("substr(processed_at, 1, 10) <= ?")
+        args.append(date_to)
+    if statuses:
+        where.append(f"overall_status IN ({','.join('?' * len(statuses))})")
+        args.extend(statuses)
+    sql = "SELECT * FROM documents" + (" WHERE " + " AND ".join(where) if where else "")
+    sql += " ORDER BY processed_at DESC, id DESC" + (f" LIMIT {int(limit)}" if limit else "")
+    return read_rows(db_path, sql, args)
+
+
+def get_document(db_path: Path, document_id: int) -> dict | None:
+    """문서 1건."""
+    rows = read_rows(db_path, "SELECT * FROM documents WHERE id = ?", (document_id,))
+    return rows[0] if rows else None
+
+
+def get_item_results(db_path: Path, document_ids: int | list[int]) -> list[dict]:
+    """문서(들)의 항목별 판정 근거 (판정 제외 항목 포함, 저장 순서)."""
+    ids = [document_ids] if isinstance(document_ids, int) else list(document_ids)
+    if not ids:
+        return []
+    return read_rows(db_path, f"SELECT * FROM item_results WHERE document_id IN ({','.join('?' * len(ids))}) "
+                              "ORDER BY document_id, id", ids)
 
 
 def is_processed(db_path: Path, mail_entry_id: str, attachment_name: str | None = None) -> bool:
@@ -395,4 +464,8 @@ def save_all(result: CoaResult, pdf_path: Path, paths: dict[str, Path]) -> Saved
             msg = f"{label} 저장 실패 - 파일이 다른 프로그램(엑셀 등)에서 열려 있는지 확인: {exc.filename}"
             log.warning(msg)
             saved.errors.append(msg)
+    with closing(connect(paths["db"])) as conn, conn:
+        conn.execute("UPDATE documents SET result_xlsx = ?, notice_path = ? WHERE id = ?",
+                     (str(saved.result_xlsx) if saved.result_xlsx else None,
+                      str(saved.notice) if saved.notice else None, saved.document_id))
     return saved

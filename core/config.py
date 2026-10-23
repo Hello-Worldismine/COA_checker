@@ -1,18 +1,20 @@
 """config.toml 로딩: 설정값을 dict로 읽고 [paths]는 프로젝트 루트 기준 절대 Path로 바꾼다."""
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+CONFIG_ENV = "COA_CONFIG"  # 다른 설정 파일을 쓰고 싶을 때(화면 테스트 등) 환경변수로 경로 지정
 
 REQUIRED_SECTIONS = ("paths", "mail", "alert", "watch", "extract")
 
 
 def load_config(path: Path | str | None = None) -> dict[str, Any]:
     """config.toml을 읽어 dict로 반환한다. [paths] 값은 설정 파일 위치 기준 절대 Path로 변환한다."""
-    config_path = Path(path) if path else DEFAULT_CONFIG_PATH
+    config_path = Path(path) if path else Path(os.environ.get(CONFIG_ENV) or DEFAULT_CONFIG_PATH)
     if not config_path.is_file():
         raise FileNotFoundError(f"설정 파일을 찾을 수 없습니다: {config_path}")
 
