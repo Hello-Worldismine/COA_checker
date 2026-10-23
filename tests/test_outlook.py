@@ -92,6 +92,9 @@ def cfg(tmp_path):
     ("COA", "qc@alpha-chem.example", [FakeAttachment("a.xlsx")], False),
     ("COA", "qc@alpha-chem.example", [FakeAttachment("logo.pdf", att_type=6)], False),  # 본문 삽입 개체
     ("자료", "evil-alpha-chem.example@x.com", [pdf()], False),
+    ("[COA 부적합] Nippon Solvent / N2418", "adm1nsubin@outlook.kr", [pdf()], False),   # 우리가 보낸 알림
+    ("[COA 검토 필요] Nippon Solvent / N2419", "jaemin9905@naver.com", [pdf()], False),
+    ("Fwd: [COA 부적합] N2418", "jaemin9905@naver.com", [pdf()], True),               # 전달 메일은 대상
 ])
 def test_is_coa_mail(spec_master, cfg, subject, sender, attachments, expected):
     """(제목 키워드 OR 협력사/허용 도메인/시연 발신자) AND PDF 첨부."""
@@ -260,6 +263,16 @@ def test_handle_mail_no_pdf(cfg, spec_master):
     reply = FakeMail("RE: COA 문의", "colleague@company.co.kr")
     assert mail_watcher.handle_mail(reply, _ctx(cfg, spec_master, alerts)) == "no_pdf"
     assert len(alerts) == 1 and reply.Categories == "COA검증완료"
+
+
+def test_own_alert_mail_not_reprocessed(cfg, spec_master):
+    """알림 수신 주소가 감시 계정이어도, 우리가 보낸 알림('[COA '로 시작)은 다시 감지하지 않는다."""
+    alerts = []
+    for subject in ("[COA 부적합] Nippon Solvent / N2418", "[COA 확인 필요] PDF 첨부 없음 - jaemin9905@naver.com"):
+        mail = FakeMail(subject, "adm1nsubin@outlook.kr")
+        assert mail_watcher.handle_mail(mail, _ctx(cfg, spec_master, alerts)) == "ignored"
+        assert mail.Categories == ""
+    assert alerts == []
 
 
 def test_handle_mail_ignores_other_mail(cfg, spec_master):

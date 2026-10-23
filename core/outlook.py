@@ -28,6 +28,7 @@ PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 PR_SENDER_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x5D01001F"
 
 CELL_COLOR = {Status.FAIL: "#FFC7CE", Status.REVIEW: "#FFEB9C", Status.PASS: "#C6EFCE"}
+ALERT_SUBJECT_PREFIX = "[COA "  # 우리가 보내는 알림 제목 머리. 이 제목의 메일은 다시 감지하지 않는다.
 
 
 # ── 메일 정보 ─────────────────────────────────────────────────
@@ -89,11 +90,12 @@ class MailCheck:
     keyword_hit: bool
     known_sender: bool
     pdf_count: int
+    own_alert: bool = False
 
     @property
     def is_candidate(self) -> bool:
-        """제목 키워드 또는 등록 발신자 중 하나라도 맞음 (PDF 여부 무관)."""
-        return self.keyword_hit or self.known_sender
+        """제목 키워드 또는 등록 발신자 중 하나라도 맞음 (PDF 여부 무관). 우리가 보낸 알림 메일은 제외."""
+        return not self.own_alert and (self.keyword_hit or self.known_sender)
 
     @property
     def is_coa(self) -> bool:
@@ -113,6 +115,7 @@ def check_mail(mail, spec: SpecMaster, config: dict) -> MailCheck | None:
         keyword_hit=bool(keyword) and keyword.lower() in subject.lower(),
         known_sender=is_known_sender(sender, spec, config),
         pdf_count=len(pdf_attachments(mail)),
+        own_alert=subject.strip().startswith(ALERT_SUBJECT_PREFIX),
     )
 
 

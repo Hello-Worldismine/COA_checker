@@ -18,7 +18,7 @@ processed_category = "COA검증완료"   # 처리 완료 메일에 붙일 Outloo
 backlog_days = 7                     # 시작 시 미처리 메일을 며칠 전까지 훑을지
 
 [alert]
-mode = "display"                     # "display"(창만 띄움) / "send"(발송)
+mode = "send"                        # "display"(창만 띄움) / "send"(발송)
 to = ["alstnqls02@naver.com"]        # 담당자 메일 주소
 
 [watch]
